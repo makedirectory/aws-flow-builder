@@ -1,113 +1,72 @@
-import Image from "next/image";
+"use client";
+import React from "react";
+import { FlowProvider, useFlow } from "../hooks/useFlow";
+import { Palette } from "../components/Palette";
+import { Canvas } from "../components/Canvas";
+import { Inspector } from "../components/Inspector";
 
-export default function Home() {
+function TopBar() {
+  const { validate, suggestRules, exportJSON, importJSONDialog, clear, status } = useFlow();
   return (
-    <main className="flex min-h-screen flex-col items-center justify-between p-24">
-      <div className="z-10 w-full max-w-5xl items-center justify-between font-mono text-sm lg:flex">
-        <p className="fixed left-0 top-0 flex w-full justify-center border-b border-gray-300 bg-gradient-to-b from-zinc-200 pb-6 pt-8 backdrop-blur-2xl dark:border-neutral-800 dark:bg-zinc-800/30 dark:from-inherit lg:static lg:w-auto  lg:rounded-xl lg:border lg:bg-gray-200 lg:p-4 lg:dark:bg-zinc-800/30">
-          Get started by editing&nbsp;
-          <code className="font-mono font-bold">src/app/page.tsx</code>
-        </p>
-        <div className="fixed bottom-0 left-0 flex h-48 w-full items-end justify-center bg-gradient-to-t from-white via-white dark:from-black dark:via-black lg:static lg:size-auto lg:bg-none">
-          <a
-            className="pointer-events-none flex place-items-center gap-2 p-8 lg:pointer-events-auto lg:p-0"
-            href="https://vercel.com?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            By{" "}
-            <Image
-              src="/vercel.svg"
-              alt="Vercel Logo"
-              className="dark:invert"
-              width={100}
-              height={24}
-              priority
-            />
-          </a>
-        </div>
+    <div className="topbar">
+      <div className="logo">🔶 <span style={{ fontWeight: 800 }}>AWS Flow Builder</span> <span className="badge">Next.js</span></div>
+      <div className="status" id="status">{status}</div>
+      <div className="toolbar">
+        <button onClick={validate} title="Check architecture">Validate</button>
+        <button onClick={suggestRules} title="Suggest rules for SG/NACL/Routes">Suggest Rules</button>
+        <button onClick={exportJSON}>Export JSON</button>
+        <button onClick={importJSONDialog}>Import JSON</button>
+        <button onClick={clear} title="Clear canvas">Clear</button>
       </div>
+    </div>
+  );
+}
 
-      <div className="relative z-[-1] flex place-items-center before:absolute before:h-[300px] before:w-full before:-translate-x-1/2 before:rounded-full before:bg-gradient-radial before:from-white before:to-transparent before:blur-2xl before:content-[''] after:absolute after:-z-20 after:h-[180px] after:w-full after:translate-x-1/3 after:bg-gradient-conic after:from-sky-200 after:via-blue-200 after:blur-2xl after:content-[''] before:dark:bg-gradient-to-br before:dark:from-transparent before:dark:to-blue-700 before:dark:opacity-10 after:dark:from-sky-900 after:dark:via-[#0141ff] after:dark:opacity-40 sm:before:w-[480px] sm:after:w-[240px] before:lg:h-[360px]">
-        <Image
-          className="relative dark:drop-shadow-[0_0_0.3rem_#ffffff70] dark:invert"
-          src="/next.svg"
-          alt="Next.js Logo"
-          width={180}
-          height={37}
-          priority
-        />
+export default function Page() {
+  return (
+    <FlowProvider>
+      <div className="app">
+        <TopBar />
+        <aside className="panel">
+          <h3>Palette</h3>
+          <Palette />
+          <div className="help">
+            Drag items onto the canvas. Hold <span className="kbd">Space</span> to pan. Press <span className="kbd">C</span> to toggle Connect mode, then click a source port and a target.
+          </div>
+          <h3>Modes</h3>
+          <div className="palette">
+            <button onClick={() => useFlow.getState().setMode("move")}>Move</button>
+            <button onClick={() => useFlow.getState().setMode("connect")}>Connect</button>
+          </div>
+          <h3>Shortcuts</h3>
+          <div className="help">
+            <div>Delete: remove selected node/edge</div>
+            <div>D: duplicate selected node</div>
+            <div>G: group selected into VPC</div>
+          </div>
+          <h3>Legend</h3>
+          <div className="palette" style={{ gridTemplateColumns: "1fr" }}>
+            <div className="item"><span className="dot" style={{ background: "var(--accent)" }}></span> Network (VPC/Subnet/Route/NACL)</div>
+            <div className="item"><span className="dot" style={{ background: "var(--accent-2)" }}></span> Compute (ECS/EC2)</div>
+            <div className="item"><span className="dot" style={{ background: "var(--yellow)" }}></span> Gateway/Edge (ALB/IGW/NAT)</div>
+            <div className="item"><span className="dot" style={{ background: "var(--green)" }}></span> Storage/DB (S3/RDS/ECR)</div>
+            <div className="item"><span className="dot" style={{ background: "var(--blue)" }}></span> Observability/IAM</div>
+          </div>
+        </aside>
+        <main className="canvas-wrap" id="canvasWrap">
+          <div className="grid" />
+          <Canvas />
+        </main>
+        <aside className="right">
+          <h3>Inspector</h3>
+          <Inspector />
+          <div className="footer">
+            <button onClick={() => useFlow.getState().fitToView()}>Fit to View</button>
+            <button onClick={() => useFlow.getState().center()}>Center</button>
+          </div>
+        </aside>
       </div>
-
-      <div className="mb-32 grid text-center lg:mb-0 lg:w-full lg:max-w-5xl lg:grid-cols-4 lg:text-left">
-        <a
-          href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className="mb-3 text-2xl font-semibold">
-            Docs{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className="m-0 max-w-[30ch] text-sm opacity-50">
-            Find in-depth information about Next.js features and API.
-          </p>
-        </a>
-
-        <a
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className="mb-3 text-2xl font-semibold">
-            Learn{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className="m-0 max-w-[30ch] text-sm opacity-50">
-            Learn about Next.js in an interactive course with&nbsp;quizzes!
-          </p>
-        </a>
-
-        <a
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className="mb-3 text-2xl font-semibold">
-            Templates{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className="m-0 max-w-[30ch] text-sm opacity-50">
-            Explore starter templates for Next.js.
-          </p>
-        </a>
-
-        <a
-          href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className="mb-3 text-2xl font-semibold">
-            Deploy{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className="m-0 max-w-[30ch] text-balance text-sm opacity-50">
-            Instantly deploy your Next.js site to a shareable URL with Vercel.
-          </p>
-        </a>
-      </div>
-    </main>
+      <div className="toast" id="toast" />
+    </FlowProvider>
   );
 }
