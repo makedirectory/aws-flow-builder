@@ -56,12 +56,14 @@ interface FlowContextValue {
   onMouseMove: (e: MouseEvent) => void;
   onMouseUp: () => void;
   onWheelZoom: (e: React.WheelEvent) => void;
+  setSpacePressed: (pressed: boolean) => void;
 
   // draw
   draw: () => void;
   drawMinimap: () => void;
   fitToView: () => void;
   center: () => void;
+  screenToWorld: (pt: { x: number; y: number }) => { x: number; y: number };
 
   // logic
   validate: () => void;
@@ -76,6 +78,8 @@ interface FlowContextValue {
   runRulesUI: () => void;
   validationHtml: string;
   rulesHtml: string;
+  undo: () => void;
+  redo: () => void;
 }
 
 const FlowContext = createContext<FlowContextValue>(null as any);
@@ -95,6 +99,10 @@ export const FlowProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [pan, setPan] = useState<Pan>({ x: 200, y: 120, scale: 1 });
   const [status, setStatus] = useState("Pan with space ⎵ + drag. Connect mode: C.");
   const [validationHtml, setValidationHtml] = useState("");
+  const historyRef = React.useRef<{ past: any[]; present: any; future: any[] }>({ past: [], present: null, future: [] });
+  const snapshot = () => ({ nodes: JSON.parse(JSON.stringify(nodes)), edges: JSON.parse(JSON.stringify(edges)), pan: { ...pan }, nextId: nextIdRef.current });
+  const commit = () => { const h = historyRef.current; if (!h.present) { h.present = snapshot(); return; } h.past.push(h.present); if (h.past.length > 100) h.past.shift(); h.present = snapshot(); h.future = []; };
+  const applyState = (s: any) => { setNodes(s.nodes); setEdges(s.edges); setPan(s.pan); nextIdRef.current = s.nextId; setSelection(null); };
   const [rulesHtml, setRulesHtml] = useState("");
 
   // Keep selection in sync when nodes/edges change
@@ -115,6 +123,19 @@ export const FlowProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [nodes, edges, selection]);
 
+  // Auto-commit when state changes (for undo/redo)
+  const prevNodesRef = useRef(nodes);
+  const prevEdgesRef = useRef(edges);
+  
+  useEffect(() => {
+    // Only commit if this is actually a change (not initial render)
+    if (prevNodesRef.current !== nodes || prevEdgesRef.current !== edges) {
+      commit();
+    }
+    prevNodesRef.current = nodes;
+    prevEdgesRef.current = edges;
+  }, [nodes, edges]);
+
   const uid = () => String(nextIdRef.current++);
 
   const screenToWorld = (pt: { x: number; y: number }) => ({ x: (pt.x - pan.x) / pan.scale, y: (pt.y - pan.y) / pan.scale });
@@ -129,11 +150,12 @@ export const FlowProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const setMode = (m: "move"|"connect") => { setModeState(m); setStatus(m === "connect" ? "Connect mode: click source then target" : "Pan with space ⎵ + drag. Connect mode: C."); };
   const toggleMode = () => setMode(mode === "connect" ? "move" : "connect");
+  const setSpacePressed = (pressed: boolean) => { spacePressed.current = pressed; };
 
   const addNode = (type: NodeType, x: number, y: number, props: Partial<FlowNode["props"]> = {}) => {
     const id = uid();
     const node: FlowNode = { id, type, x, y, w: 200, h: 96, props: { name: `${props.name || type} ${id}`, cidr: props.cidr || "", public: !!props.public, az: props.az || "", notes: props.notes || "" } };
-    setNodes(n => [...n, node]); setTimeout(() => { draw(); drawMinimap(); }, 0);
+    setNodes(n => [...n, node]);
     setSelection({ type: "node", id, node });
   };
 
@@ -183,6 +205,7 @@ export const FlowProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // ------- Interaction & drawing -------
   const dragRef = useRef<{ nodeId: string; dx: number; dy: number } | null>(null);
   const panningRef = useRef(false);
+  const spacePressed = useRef(false);
   const connectStartRef = useRef<string | null>(null);
 
   const select = (sel: FlowContextValue["selection"]) => {
@@ -235,8 +258,8 @@ export const FlowProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
     
-    // Handle panning for canvas background only
-    if (e.button === 1 || e.button === 0) {
+    // Handle panning for canvas background only - middle mouse or space+left mouse
+    if (e.button === 1 || (e.button === 0 && spacePressed.current)) {
       panningRef.current = true; 
       e.preventDefault(); 
       return;
@@ -388,6 +411,8 @@ export const FlowProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const d = `M ${p1.x} ${p1.y} C ${p1.x + dx} ${p1.y}, ${p2.x - dx} ${p2.y}, ${p2.x} ${p2.y}`;
 
       const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      (path as any).style.pointerEvents = 'stroke';
+      (path as any).style.pointerEvents = 'stroke';
       path.setAttribute("d", d);
       path.setAttribute("class", "edge");
       path.setAttribute("data-id", edge.id);
@@ -720,6 +745,9 @@ export const FlowProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const suggestRules = () => { suggestRulesInner(); };
   const runValidateUI = () => validateInner();
   const runRulesUI = () => suggestRulesInner();
+  const undo = () => { const h = historyRef.current; if (h.past.length === 0) return; h.future.unshift(h.present); const prev = h.past.pop(); if (prev) { h.present = prev; applyState(prev); } };
+  const redo = () => { const h = historyRef.current; if (h.future.length === 0) return; h.past.push(h.present); const next = h.future.shift(); if (next) { h.present = next; applyState(next); } };
+
 
   const value: FlowContextValue = {
     PALETTE,
@@ -733,10 +761,10 @@ export const FlowProvider: React.FC<{ children: React.ReactNode }> = ({ children
       addNode('VPC', n.x - 80, n.y - 80, { name: 'VPC', cidr: '10.0.0.0/16' });
     },
     connect, updateInspectorFields,
-    onNodeMouseDown, onCanvasMouseDown, onCanvasClick, onMouseMove, onMouseUp, onWheelZoom,
-    draw, drawMinimap, fitToView, center,
+    onNodeMouseDown, onCanvasMouseDown, onCanvasClick, onMouseMove, onMouseUp, onWheelZoom, setSpacePressed,
+    draw, drawMinimap, fitToView, center, screenToWorld,
     validate, suggestRules, exportJSON, importJSONDialog, clear, loadPreset,
-    runValidateUI, runRulesUI, validationHtml, rulesHtml
+    runValidateUI, runRulesUI, validationHtml, rulesHtml, undo, redo
   };
 
   return <FlowContext.Provider value={value}>{children}</FlowContext.Provider>;

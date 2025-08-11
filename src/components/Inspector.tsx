@@ -3,7 +3,7 @@ import React from "react";
 import { useFlow } from "../hooks/useFlow";
 
 export const Inspector: React.FC = () => {
-  const { selection, updateInspectorFields, runValidateUI, runRulesUI, validationHtml, rulesHtml } = useFlow();
+  const { selection, updateInspectorFields, runValidateUI, runRulesUI, validationHtml, rulesHtml, removeSelection } = useFlow();
 
   if (!selection) {
     return (

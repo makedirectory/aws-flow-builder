@@ -7,35 +7,38 @@ export const Canvas: React.FC = () => {
     worldRef, svgRef, minimapRef,
     addNodeFromPalette, select, onNodeMouseDown, onWheelZoom,
     onMouseMove, onMouseUp, onCanvasMouseDown, onCanvasClick,
-    draw, drawMinimap,
-    toggleMode, removeSelection, duplicateSelection, groupIntoVPC
+    draw, drawMinimap, screenToWorld, state,
+    toggleMode, removeSelection, duplicateSelection, groupIntoVPC, setSpacePressed
   } = useFlow();
 
 
+  // Document-level drag and drop (fallback)
   useEffect(() => {
-    const world = worldRef.current!;
     const onDragOver = (e: DragEvent) => { e.preventDefault(); };
     const onDrop = (e: DragEvent) => {
       e.preventDefault();
-      const data = e.dataTransfer?.getData("application/json");
-      if (!data) return;
-      const item = JSON.parse(data);
-      const rect = wrap.getBoundingClientRect();
-      const client = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-      addNodeFromPalette(item, client);
+      const raw = e.dataTransfer?.getData('application/json');
+      if (!raw) return;
+      try { 
+        const item = JSON.parse(raw);
+        const worldPos = screenToWorld({ x: e.clientX, y: e.clientY });
+        addNodeFromPalette(item.type, worldPos.x, worldPos.y);
+      } catch {}
     };
-    world.addEventListener("dragover", onDragOver);
-    world.addEventListener("drop", onDrop);
+    document.addEventListener('dragover', onDragOver, false);
+    document.addEventListener('drop', onDrop, false);
     return () => {
-      world.removeEventListener("dragover", onDragOver);
-      world.removeEventListener("drop", onDrop);
+      document.removeEventListener('dragover', onDragOver, false);
+      document.removeEventListener('drop', onDrop, false);
     };
-  }, [addNodeFromPalette]);
+  }, [addNodeFromPalette, screenToWorld]);
 
-  useEffect(() => { 
-    draw(); 
-    drawMinimap(); 
-  });
+  // Redraw when nodes, edges, or pan changes
+  useEffect(() => {
+    draw();
+    drawMinimap();
+  }, [state.nodes, state.edges, state.pan, draw, drawMinimap]);
+
 
   useEffect(() => {
     window.addEventListener("mousemove", onMouseMove);
@@ -48,33 +51,52 @@ export const Canvas: React.FC = () => {
 
   // keyboard shortcuts
   useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.code === "Space") document.body.style.cursor = "grab";
+    
+const onKeyDown = (e: KeyboardEvent) => {
+  const ae = document.activeElement as HTMLElement | null;
+  const tag = ae?.tagName?.toLowerCase();
+  const typing = ae && (tag === 'input' || tag === 'textarea' || tag === 'select' || ae.isContentEditable);
+  if (typing) return;
+
+      if (e.code === "Space") { 
+        document.body.style.cursor = "grab"; 
+        setSpacePressed(true); 
+      }
       if (e.key === "c" || e.key === "C") toggleMode();
       if (e.key === "Delete" || e.key === "Backspace") removeSelection();
       if (e.key === "d" || e.key === "D") duplicateSelection();
       if (e.key === "g" || e.key === "G") groupIntoVPC();
     };
-    const onKeyUp = (e: KeyboardEvent) => { if (e.code === "Space") document.body.style.cursor = "default"; };
+    const onKeyUp = (e: KeyboardEvent) => { 
+      if (e.code === "Space") { 
+        document.body.style.cursor = "default"; 
+        setSpacePressed(false); 
+      }
+    };
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
     return () => {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
     };
-  }, [toggleMode, removeSelection, duplicateSelection, groupIntoVPC]);
+  }, [toggleMode, removeSelection, duplicateSelection, groupIntoVPC, setSpacePressed]);
 
   return (
     <>
-      <svg className="edges" ref={svgRef} />
-      <div 
-        className="world" 
-        ref={worldRef}
-        onMouseDown={(e) => onCanvasMouseDown(e)}
-        onClick={(e) => onCanvasClick(e)}
-        onWheel={onWheelZoom}
-      />
-      <div className="minimap"><canvas ref={minimapRef} /></div>
-    </>
-  );
+  <svg className="edges" ref={svgRef} />
+  <div 
+    className="world" 
+    ref={worldRef} 
+    onClick={() => select(null)}
+    onMouseDown={(e) => onCanvasMouseDown(e)}
+    onWheel={onWheelZoom}
+  />
+  <div
+    className="overlay"
+    onClick={onCanvasClick}
+  />
+  <div className="minimap"><canvas ref={minimapRef} /></div>
+</>
+
+);
 };

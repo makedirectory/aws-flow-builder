@@ -7,12 +7,14 @@ import { Canvas } from "../components/Canvas";
 import { Inspector } from "../components/Inspector";
 
 function TopBar() {
-  const { validate, suggestRules, exportJSON, importJSONDialog, clear, status } = useFlow();
+  const { validate, suggestRules, exportJSON, importJSONDialog, clear, status, undo, redo } = useFlow();
   return (
     <div className="topbar">
       <div className="logo">🔶 <span style={{ fontWeight: 800 }}>AWS Flow Builder</span> <span className="badge">Next.js</span></div>
       <div className="status" id="status">{status}</div>
       <div className="toolbar">
+        <button onClick={undo} title="Undo (⌘Z / Ctrl+Z)">Undo</button>
+        <button onClick={redo} title="Redo (⇧⌘Z / Ctrl+Y)">Redo</button>
         <button onClick={validate} title="Check architecture">Validate</button>
         <button onClick={suggestRules} title="Suggest rules for SG/NACL/Routes">Suggest Rules</button>
         <button onClick={exportJSON}>Export JSON</button>
