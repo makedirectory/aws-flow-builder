@@ -24,11 +24,35 @@ function TopBar() {
 }
 
 function ModeButtons(){
-  const { setMode } = useFlow();
+  const { setMode, state } = useFlow();
   return (
     <div className="palette">
-      <button onClick={() => setMode("move")}>Move</button>
-      <button onClick={() => setMode("connect")}>Connect</button>
+      <button 
+        onClick={() => setMode("move")} 
+        className={state.mode === "move" ? "active" : ""}
+      >
+        Move
+      </button>
+      <button 
+        onClick={() => setMode("connect")} 
+        className={state.mode === "connect" ? "active" : ""}
+      >
+        Connect
+      </button>
+    </div>
+  );
+}
+
+function PresetButtons(){
+  const { loadPreset } = useFlow();
+  return (
+    <div className="palette">
+      <button onClick={() => loadPreset("aws-basic")}>
+        Basic AWS
+      </button>
+      <button onClick={() => loadPreset("ecs-alb")}>
+        ECS + ALB
+      </button>
     </div>
   );
 }
@@ -52,8 +76,10 @@ export default function Page() {
           <h3>Palette</h3>
           <Palette />
           <div className="help">
-            Drag items onto the canvas. Hold <span className="kbd">Space</span> to pan. Press <span className="kbd">C</span> to toggle Connect mode, then click a source port and a target.
+            Drag items onto empty canvas or on top of a node. Hold <span className="kbd">Space</span> to pan. Press <span className="kbd">C</span> to toggle Connect mode, or click a small dot on a node to start a wire, then click the target node.
           </div>
+          <h3>Presets</h3>
+          <PresetButtons />
           <h3>Modes</h3>
           <ModeButtons />
           <h3>Shortcuts</h3>

@@ -11,10 +11,9 @@ export const Canvas: React.FC = () => {
     toggleMode, removeSelection, duplicateSelection, groupIntoVPC
   } = useFlow();
 
-  const wrapRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    const wrap = wrapRef.current!;
+    const world = worldRef.current!;
     const onDragOver = (e: DragEvent) => { e.preventDefault(); };
     const onDrop = (e: DragEvent) => {
       e.preventDefault();
@@ -25,15 +24,18 @@ export const Canvas: React.FC = () => {
       const client = { x: e.clientX - rect.left, y: e.clientY - rect.top };
       addNodeFromPalette(item, client);
     };
-    wrap.addEventListener("dragover", onDragOver);
-    wrap.addEventListener("drop", onDrop);
+    world.addEventListener("dragover", onDragOver);
+    world.addEventListener("drop", onDrop);
     return () => {
-      wrap.removeEventListener("dragover", onDragOver);
-      wrap.removeEventListener("drop", onDrop);
+      world.removeEventListener("dragover", onDragOver);
+      world.removeEventListener("drop", onDrop);
     };
   }, [addNodeFromPalette]);
 
-  useEffect(() => { draw(); drawMinimap(); });
+  useEffect(() => { 
+    draw(); 
+    drawMinimap(); 
+  });
 
   useEffect(() => {
     window.addEventListener("mousemove", onMouseMove);
@@ -65,12 +67,11 @@ export const Canvas: React.FC = () => {
   return (
     <>
       <svg className="edges" ref={svgRef} />
-      <div className="world" ref={worldRef} onClick={() => select(null)} />
-      <div
-        ref={wrapRef}
-        className="overlay"
+      <div 
+        className="world" 
+        ref={worldRef}
         onMouseDown={(e) => onCanvasMouseDown(e)}
-        onClick={onCanvasClick}
+        onClick={(e) => onCanvasClick(e)}
         onWheel={onWheelZoom}
       />
       <div className="minimap"><canvas ref={minimapRef} /></div>

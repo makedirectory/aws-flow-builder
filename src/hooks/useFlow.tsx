@@ -1,5 +1,5 @@
 "use client";
-import React, { createContext, useContext, useRef, useState } from "react";
+import React, { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { FlowEdge, FlowNode, NodeType, Pan, PaletteItem } from "../types";
 
 // ---------- Palette ----------
@@ -42,7 +42,7 @@ interface FlowContextValue {
   toggleMode: () => void;
   select: (sel: FlowContextValue["selection"]) => void;
   addNode: (type: NodeType, x: number, y: number, props?: Partial<FlowNode["props"]>) => void;
-  addNodeFromPalette: (item: PaletteItem, client: { x: number; y: number }) => void;
+  addNodeFromPalette: (type: NodeType, x: number, y: number) => void;
   removeSelection: () => void;
   duplicateSelection: () => void;
   groupIntoVPC: () => void;
@@ -69,6 +69,7 @@ interface FlowContextValue {
   exportJSON: () => void;
   importJSONDialog: () => void;
   clear: () => void;
+  loadPreset: (presetName: string) => void;
 
   // UI helper HTML strings
   runValidateUI: () => void;
@@ -88,7 +89,7 @@ export const FlowProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const [nodes, setNodes] = useState<FlowNode[]>([]);
   const [edges, setEdges] = useState<FlowEdge[]>([]);
-  const [nextId, setNextId] = useState<number>(1);
+  const nextIdRef = React.useRef<number>(1);
   const [selection, setSelection] = useState<FlowContextValue["selection"]>(null);
   const [mode, setModeState] = useState<"move"|"connect">("move");
   const [pan, setPan] = useState<Pan>({ x: 200, y: 120, scale: 1 });
@@ -96,7 +97,25 @@ export const FlowProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [validationHtml, setValidationHtml] = useState("");
   const [rulesHtml, setRulesHtml] = useState("");
 
-  const uid = () => String((prevId => { setNextId(prevId + 1); return prevId; })(nextId));
+  // Keep selection in sync when nodes/edges change
+  useEffect(() => {
+    if (!selection) return;
+    if (selection.type === "node") {
+      const updatedNode = nodes.find(n => n.id === selection.id);
+      if (updatedNode && updatedNode !== selection.node) {
+        setSelection({ ...selection, node: updatedNode });
+      }
+    } else if (selection.type === "edge") {
+      const updatedEdge = edges.find(e => e.id === selection.id);
+      if (updatedEdge && updatedEdge !== selection.edge) {
+        const fromName = nodes.find(n => n.id === updatedEdge.from)?.props.name + " (" + (nodes.find(n => n.id === updatedEdge.from)?.type || updatedEdge.from) + ")" || updatedEdge.from;
+        const toName = nodes.find(n => n.id === updatedEdge.to)?.props.name + " (" + (nodes.find(n => n.id === updatedEdge.to)?.type || updatedEdge.to) + ")" || updatedEdge.to;
+        setSelection({ ...selection, edge: updatedEdge, edgeFromTo: { fromName, toName } });
+      }
+    }
+  }, [nodes, edges, selection]);
+
+  const uid = () => String(nextIdRef.current++);
 
   const screenToWorld = (pt: { x: number; y: number }) => ({ x: (pt.x - pan.x) / pan.scale, y: (pt.y - pan.y) / pan.scale });
   const nodeColor = (type: NodeType) => {
@@ -114,14 +133,13 @@ export const FlowProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const addNode = (type: NodeType, x: number, y: number, props: Partial<FlowNode["props"]> = {}) => {
     const id = uid();
     const node: FlowNode = { id, type, x, y, w: 200, h: 96, props: { name: `${props.name || type} ${id}`, cidr: props.cidr || "", public: !!props.public, az: props.az || "", notes: props.notes || "" } };
-    setNodes(n => [...n, node]);
+    setNodes(n => [...n, node]); setTimeout(() => { draw(); drawMinimap(); }, 0);
     setSelection({ type: "node", id, node });
   };
 
-  const addNodeFromPalette = (item: PaletteItem, client: { x: number; y: number }) => {
-    const wrap = (worldRef.current?.parentElement as HTMLElement).getBoundingClientRect();
-    const pt = screenToWorld({ x: client.x + wrap.left, y: client.y + wrap.top });
-    addNode(item.type, pt.x - 80, pt.y - 40, item.defaults || {});
+  const addNodeFromPalette = (type: NodeType, x: number, y: number) => {
+    const paletteItem = PALETTE.find(p => p.type === type);
+    addNode(type, x, y, paletteItem?.defaults || {});
   };
 
   const removeSelection = () => {
@@ -158,6 +176,8 @@ export const FlowProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } else if (selection.type === "edge" && patch.rel) {
       setEdges(es => es.map(e => e.id === selection.id ? { ...e, rel: patch.rel } : e));
     }
+    // Ensure the changes are reflected in the canvas
+    setTimeout(() => draw(), 0);
   };
 
   // ------- Interaction & drawing -------
@@ -168,32 +188,26 @@ export const FlowProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const select = (sel: FlowContextValue["selection"]) => {
     if (!sel) { setSelection(null); highlightSelection(); return; }
     if (sel.type === "node") {
-      const node = nodes.find(n => n.id === sel.id);
+      // Use the passed node if available, otherwise find it
+      const node = sel.node || nodes.find(n => n.id === sel.id);
       if (node) setSelection({ ...sel, node });
     } else if (sel.type === "edge") {
-      const edge = edges.find(e => e.id === sel.id);
+      // Use the passed edge if available, otherwise find it
+      const edge = sel.edge || edges.find(e => e.id === sel.id);
       if (edge) setSelection({ ...sel, edge, edgeFromTo: { fromName: nameOf(edge.from), toName: nameOf(edge.to) } });
     }
     highlightSelection();
   };
 
   const onNodeMouseDown = (e: React.MouseEvent, node: FlowNode) => {
-    if (mode === "connect") {
-      e.stopPropagation();
-      if (connectStartRef.current && connectStartRef.current !== node.id) {
-        connect(connectStartRef.current, node.id);
-        connectStartRef.current = null; setMode("move");
-        return;
-      }
-      connectStartRef.current = node.id; toast(`Connecting from ${node.props.name} → click a target`);
-      return;
-    }
-    e.preventDefault(); e.stopPropagation();
-    const startX = (e as any).clientX; const startY = (e as any).clientY;
+    // Only handle dragging - connect mode is handled by ports
+    e.preventDefault(); 
+    e.stopPropagation();
+    const startX = (e as any).clientX; 
+    const startY = (e as any).clientY;
     const dx = startX - (pan.x + node.x * pan.scale);
     const dy = startY - (pan.y + node.y * pan.scale);
     dragRef.current = { nodeId: node.id, dx, dy };
-    select({ type: "node", id: node.id, node });
   };
 
   const onMouseMove = (e: MouseEvent) => {
@@ -212,14 +226,34 @@ export const FlowProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const onMouseUp = () => { dragRef.current = null; panningRef.current = false; };
 
   const onCanvasMouseDown = (e: React.MouseEvent) => {
-    const isGrid = (e.target as HTMLElement).classList.contains("overlay") || (e.target as HTMLElement).classList.contains("grid");
-    if (isGrid && (e.button === 1 || (e.buttons === 1 && (e.nativeEvent as any).getModifierState("Space")))) {
-      panningRef.current = true; e.preventDefault(); return;
+    const target = e.target as HTMLElement;
+    const isNode = target.closest('.node') !== null;
+    const isPort = target.closest('.port') !== null;
+    
+    // Don't handle panning if clicking on nodes or ports
+    if (isNode || isPort) {
+      return;
     }
-    if (isGrid && e.button === 0) { panningRef.current = true; e.preventDefault(); return; }
+    
+    // Handle panning for canvas background only
+    if (e.button === 1 || e.button === 0) {
+      panningRef.current = true; 
+      e.preventDefault(); 
+      return;
+    }
   };
 
-  const onCanvasClick = () => select(null);
+  const onCanvasClick = (e?: React.MouseEvent) => {
+    if (!e) return;
+    const target = e.target as HTMLElement;
+    const isNode = target.closest('.node') !== null;
+    const isPort = target.closest('.port') !== null;
+    
+    // Only deselect when clicking canvas background, not nodes or ports
+    if (!isNode && !isPort) {
+      select(null);
+    }
+  };
 
   const onWheelZoom = (e: React.WheelEvent) => {
     if (e.ctrlKey || e.metaKey) {
@@ -252,11 +286,11 @@ export const FlowProvider: React.FC<{ children: React.ReactNode }> = ({ children
   function draw() {
     const world = worldRef.current!;
     const svg = svgRef.current!;
-    (world as HTMLElement).style.transform = `translate(${pan.x}px, ${pan.y}px) scale(${pan.scale})`;
-    (svg as HTMLElement).style.transform = `translate(${pan.x}px, ${pan.y}px) scale(${pan.scale})`;
+    world.style.transform = `translate(${pan.x}px, ${pan.y}px) scale(${pan.scale})`;
+    svg.style.transform = `translate(${pan.x}px, ${pan.y}px) scale(${pan.scale})`;
 
     world.innerHTML = "";
-    nodes.forEach((n) => {
+    nodes.forEach((n) => { try {
       const div = document.createElement("div");
       div.className = "node";
       div.style.left = n.x + "px";
@@ -267,25 +301,80 @@ export const FlowProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const header = document.createElement("div");
       header.className = "node-header";
-      header.innerHTML = `<div class="node-title">${n.props.name}</div><span class="badge" style="border-color:${nodeColor(n.type)}; color:${nodeColor(n.type)}">${n.type}</span>`;
+      header.innerHTML = `<div class="node-title">${n.props.name}</div>`;
+      const right = document.createElement('div'); right.className = 'ports';
+      const badge = document.createElement('span'); badge.className='badge'; badge.style.borderColor = nodeColor(n.type) as any; badge.style.color = nodeColor(n.type) as any; badge.textContent = n.type;
+      const pOut = document.createElement('span'); pOut.className='port port-out'; pOut.title='Start connection';
+      pOut.addEventListener('mousedown', (e)=>{ e.stopPropagation(); connectStartRef.current = n.id; setMode('connect'); setStatus('Connecting from ' + n.props.name + '… click a target'); });
+      const pIn = document.createElement('span'); pIn.className='port port-in'; pIn.title='Finish connection';
+      pIn.addEventListener('mousedown', (e)=>{ e.stopPropagation(); if (connectStartRef.current && connectStartRef.current !== n.id) { connect(connectStartRef.current, n.id); connectStartRef.current = null; setStatus('Connected.'); } else { select({ type:'node', id:n.id, node:n }); } });
+      right.appendChild(badge); right.appendChild(pOut); right.appendChild(pIn); header.appendChild(right);
       div.appendChild(header);
 
       const body = document.createElement("div");
       body.className = "node-body";
-      const pills: string[] = [];
-      if (n.props.cidr) pills.push(`<span class="pill"><span class="port" title="connect" data-port="out"></span>CIDR ${n.props.cidr}</span>`);
-      if (typeof n.props.public !== "undefined") pills.push(`<span class="pill">${n.props.public ? "Public" : "Private"}</span>`);
-      if (n.props.az) pills.push(`<span class="pill">${n.props.az}</span>`);
-      body.innerHTML = pills.join(" ");
-      const portIn = document.createElement("span"); portIn.className = "port"; (portIn as any).dataset.port = "in"; (portIn as HTMLElement).style.marginRight = "8px";
-      body.prepend(portIn);
+      
+      // Add input port
+      const portIn = document.createElement("span"); 
+      portIn.className = "port"; 
+      portIn.title = "connect";
+      (portIn as any).dataset.port = "in"; 
+      portIn.style.marginRight = "8px";
+      portIn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (mode === "connect" && connectStartRef.current && connectStartRef.current !== n.id) {
+          connect(connectStartRef.current, n.id);
+          connectStartRef.current = null; 
+          setMode("move");
+        }
+      });
+      body.appendChild(portIn);
+      
+      // Add pills
+      if (n.props.cidr) {
+        const pillSpan = document.createElement("span");
+        pillSpan.className = "pill";
+        
+        const outPortSpan = document.createElement("span");
+        outPortSpan.className = "port";
+        outPortSpan.title = "connect";
+        (outPortSpan as any).dataset.port = "out";
+        outPortSpan.addEventListener("click", (e) => {
+          e.stopPropagation();
+          setMode("connect");
+          connectStartRef.current = n.id;
+          toast(`Connecting from ${n.props.name} → click a target port`);
+        });
+        
+        pillSpan.appendChild(outPortSpan);
+        pillSpan.appendChild(document.createTextNode(`CIDR ${n.props.cidr}`));
+        body.appendChild(pillSpan);
+      }
+      
+      if (typeof n.props.public !== "undefined") {
+        const pillSpan = document.createElement("span");
+        pillSpan.className = "pill";
+        pillSpan.textContent = n.props.public ? "Public" : "Private";
+        body.appendChild(pillSpan);
+      }
+      
+      if (n.props.az) {
+        const pillSpan = document.createElement("span");
+        pillSpan.className = "pill";
+        pillSpan.textContent = n.props.az;
+        body.appendChild(pillSpan);
+      }
       div.appendChild(body);
 
-      div.addEventListener("mousedown", (e) => onNodeMouseDown(e as any, n));
-      div.addEventListener("click", (e) => { e.stopPropagation(); select({ type: "node", id: n.id, node: n }); });
+      div.addEventListener("mousedown", (e) => {
+        if ((e.target as HTMLElement).closest('.port')) return;
+        onNodeMouseDown(e as any, n);
+        select({ type: "node", id: n.id, node: n });
+      });
       div.addEventListener("dblclick", (e) => { e.stopPropagation(); const newName = window.prompt("Rename node", n.props.name); if (newName !== null) { setNodes(ns => ns.map(x => x.id === n.id ? { ...x, props: { ...x.props, name: newName } } : x)); draw(); } });
 
       world.appendChild(div);
+    } catch (err) { console.error('draw node failed', n, err); }
     });
 
     svg.innerHTML = "";
@@ -505,7 +594,7 @@ export const FlowProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }
 
   function exportJSON() {
-    const data = { nodes, edges, pan, nextId };
+    const data = { nodes, edges, pan, nextId: nextIdRef.current };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'aws-flow.json'; a.click();
   }
@@ -517,7 +606,8 @@ export const FlowProvider: React.FC<{ children: React.ReactNode }> = ({ children
       reader.onload = () => {
         try {
           const data = JSON.parse(String(reader.result));
-          setNodes(data.nodes || []); setEdges(data.edges || []); setPan(data.pan || pan); setNextId(data.nextId || 1); setSelection(null); toast('Imported.'); draw();
+          setNodes(data.nodes || []); setEdges(data.edges || []); setPan(data.pan || pan);
+          nextIdRef.current = (data.nextId && Number.isFinite(data.nextId)) ? data.nextId : Math.max(1, (data.nodes?.length||0)+(data.edges?.length||0)+1); setSelection(null); toast('Imported.'); draw();
         } catch { alert('Invalid JSON'); }
       };
       reader.readAsText(f);
@@ -525,18 +615,65 @@ export const FlowProvider: React.FC<{ children: React.ReactNode }> = ({ children
     input.click();
   }
 
-  function clear() { if (confirm('Clear canvas?')) { setNodes([]); setEdges([]); setSelection(null); draw(); } }
-
-  function toast(msg: string) {
-    const el = document.querySelector('#toast') as HTMLElement; if (!el) return;
-    el.textContent = msg; el.style.display = 'block';
-    (toast as any)._t && clearTimeout((toast as any)._t);
-    (toast as any)._t = setTimeout(() => { el.style.display = 'none'; }, 1600);
+  function clear() { 
+    if (confirm('Clear canvas?')) { 
+      setNodes([]); 
+      setEdges([]); 
+      setSelection(null); 
+    } 
   }
 
-  function seed() {
-    const addSeed = (type: NodeType, x: number, y: number, props: any) => { const id = uid(); const node: FlowNode = { id, type, x, y, w: 200, h: 96, props: { name: props.name || type + ' ' + id, cidr: props.cidr || '', public: !!props.public, az: props.az || '', notes: props.notes || '' } }; setNodes(ns => [...ns, node]); return id; };
-    const linkSeed = (a: string, b: string, rel: FlowEdge["rel"]) => { const id = uid(); setEdges(es => [...es, { id, from: a, to: b, rel }]); };
+  function loadPreset(presetName: string) {
+    if (presetName === "aws-basic") {
+      loadBasicAWSSetup();
+    } else if (presetName === "ecs-alb") {
+      loadECSALBSetup();
+    }
+  }
+
+  function loadBasicAWSSetup() {
+    const newNodes: FlowNode[] = [];
+    const newEdges: FlowEdge[] = [];
+    
+    const addSeed = (type: NodeType, x: number, y: number, props: any) => { 
+      const id = uid(); 
+      const node: FlowNode = { id, type, x, y, w: 200, h: 96, props: { name: props.name || type + ' ' + id, cidr: props.cidr || '', public: !!props.public, az: props.az || '', notes: props.notes || '' } }; 
+      newNodes.push(node);
+      return id; 
+    };
+    const linkSeed = (a: string, b: string, rel: FlowEdge["rel"]) => { 
+      const id = uid(); 
+      newEdges.push({ id, from: a, to: b, rel });
+    };
+
+    const vpc = addSeed('VPC', 80, 120, { name: 'VPC', cidr: '10.0.0.0/16' });
+    const pubA = addSeed('Subnet (Public)', 140, 220, { name: 'Public A', cidr: '10.0.1.0/24', public: true, az: 'us-east-1a' });
+    const priA = addSeed('Subnet (Private)', 140, 360, { name: 'Private A', cidr: '10.0.2.0/24', public: false, az: 'us-east-1a' });
+    const igw = addSeed('Internet Gateway', 420, 180, { name: 'IGW' });
+
+    linkSeed(vpc, pubA, 'attached_to'); 
+    linkSeed(vpc, priA, 'attached_to');
+    linkSeed(igw, vpc, 'attached_to');
+
+    setNodes(newNodes);
+    setEdges(newEdges);
+    setSelection(null);
+  }
+
+  function loadECSALBSetup() {
+    const newNodes: FlowNode[] = [];
+    const newEdges: FlowEdge[] = [];
+    
+    const addSeed = (type: NodeType, x: number, y: number, props: any) => { 
+      const id = uid(); 
+      const node: FlowNode = { id, type, x, y, w: 200, h: 96, props: { name: props.name || type + ' ' + id, cidr: props.cidr || '', public: !!props.public, az: props.az || '', notes: props.notes || '' } }; 
+      newNodes.push(node);
+      return id; 
+    };
+    const linkSeed = (a: string, b: string, rel: FlowEdge["rel"]) => { 
+      const id = uid(); 
+      newEdges.push({ id, from: a, to: b, rel });
+    };
 
     const vpc = addSeed('VPC', 80, 120, { name: 'VPC', cidr: '10.0.0.0/16' });
     const pubA = addSeed('Subnet (Public)', 140, 220, { name: 'Public A', cidr: '10.0.1.0/24', public: true, az: 'us-east-1a' });
@@ -564,10 +701,20 @@ export const FlowProvider: React.FC<{ children: React.ReactNode }> = ({ children
     linkSeed(tg, ecs, 'targets');
     linkSeed(sgApp, ecs, 'attached_to');
 
-    setTimeout(() => { draw(); }, 0);
+    setNodes(newNodes);
+    setEdges(newEdges);
+    setSelection(null);
   }
 
-  React.useEffect(() => { seed(); }, []);
+  function toast(msg: string) {
+    const el = document.querySelector('#toast') as HTMLElement; if (!el) return;
+    el.textContent = msg; el.style.display = 'block';
+    (toast as any)._t && clearTimeout((toast as any)._t);
+    (toast as any)._t = setTimeout(() => { el.style.display = 'none'; }, 1600);
+  }
+
+
+  // Start with empty canvas - removed seed() call
 
   const validate = () => { validateInner(); };
   const suggestRules = () => { suggestRulesInner(); };
@@ -576,7 +723,7 @@ export const FlowProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const value: FlowContextValue = {
     PALETTE,
-    state: { nodes, edges, pan, mode, nextId },
+    state: { nodes, edges, pan, mode, nextId: nextIdRef.current },
     worldRef, svgRef, minimapRef,
     selection, status,
     setMode, toggleMode, select,
@@ -588,7 +735,7 @@ export const FlowProvider: React.FC<{ children: React.ReactNode }> = ({ children
     connect, updateInspectorFields,
     onNodeMouseDown, onCanvasMouseDown, onCanvasClick, onMouseMove, onMouseUp, onWheelZoom,
     draw, drawMinimap, fitToView, center,
-    validate, suggestRules, exportJSON, importJSONDialog, clear,
+    validate, suggestRules, exportJSON, importJSONDialog, clear, loadPreset,
     runValidateUI, runRulesUI, validationHtml, rulesHtml
   };
 
